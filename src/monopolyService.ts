@@ -1,42 +1,5 @@
 /**
- * This module implements a REST-inspired web service for the Monopoly DB hosted
- * on PostgreSQL for Azure. Notes:
- *
- * - Currently, this service supports the Player table only.
- *
- * - This service is written in TypeScript and uses Node type-stripping, which
- * is experimental, but simple (see: https://nodejs.org/en/learn/typescript/run-natively).
- * To do a static type check, run the following:
- *      npm run type-check
- *
- * - The service assumes that the database connection strings and the server
- * mode are set in environment variables (e.g., using a git-ignored `.env.sh` file).
- * See the DB_* variables used by pgPromise.
- *
- * - To execute locally, run the following:
- *      source .env
- *      npm start
- *
- * - To guard against SQL injection attacks, this code uses pgPromise's built-in
- * variable escaping. This prevents a client from issuing this SQL-injection URL:
- *     `https://cs262.azurewebsites.net/players/1;DELETE FROM Player`
- * which would delete records in the PlayerGame and then the Player tables.
- * In particular, we don't use JS template strings because this doesn't filter
- * client-supplied values properly. We didn't do this, but we would also want to
- * create and connect to a new PostgreSQL account with limited privileges for the
- * application, rather than using the administrator account, which can get DB
- * meta-information from the system tables.
- *
- * - The endpoints call `next(err)` to handle errors without crashing the service.
- * This initiates the default error handling middleware, which logs full error
- * details to the server-side console and returns uninformative HTTP 500
- * responses to clients. This makes the service a bit more secure (because it
- * doesn't reveal database details to clients), but also makes it more difficult
- * for API users (because they don't get useful error messages).
- *
- * @author: kvlinden
- * @date: Summer, 2020
- * @date: Fall, 2025 (updated to JS->TS, Node version, master->main repo, added SQL injection examples)
+ * Monopoly Service — Updated with /games endpoints for Homework 3
  */
 
 import express from 'express';
@@ -62,24 +25,25 @@ const router = express.Router();
 
 router.use(express.json());
 router.get('/', readHello);
+
+/** Player endpoints **/
 router.get('/players', readPlayers);
 router.get('/players/:id', readPlayer);
 router.put('/players/:id', updatePlayer);
 router.post('/players', createPlayer);
 router.delete('/players/:id', deletePlayer);
 
-// For testing only; vulnerable to SQL injection!
-// router.get('/bad/players/:id', readPlayerBad);
+/** NEW — Game endpoints required for Homework 3 **/
+router.get('/games', readGames);
+router.get('/games/:id', readGamePlayers);
+router.delete('/games/:id', deleteGame);
 
 app.use(router);
 
 // Custom error handler - must be defined AFTER all routes
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void => {
-    // Log the full error server-side for debugging
     console.error('Error:', err.message);
     console.error('Stack:', err.stack);
-
-    // Send generic error to client (never expose internal details)
     res.status(500).json({
         error: 'An internal server error occurred'
     });
@@ -90,9 +54,7 @@ app.listen(port, (): void => {
 });
 
 /**
- * This utility function standardizes the response pattern for database queries,
- * returning the data using the given response, or a 404 status for null data
- * (e.g., when a record is not found).
+ * Utility function: returns data or 404 if null.
  */
 function returnDataOr404(response: Response, data: unknown): void {
     if (data == null) {
@@ -103,22 +65,22 @@ function returnDataOr404(response: Response, data: unknown): void {
 }
 
 /**
- * This endpoint returns a simple hello-world message, serving as a basic
- * health check and welcome message for the API.
+ * Basic hello-world endpoint.
  */
 function readHello(_request: Request, response: Response): void {
     response.send('Hello, CS 262 Monopoly service!');
 }
 
-// CRUD functions
+/* =
+   PLAYER CRUD FUNCTIONS
+   */
 
 /**
- * Retrieves all players from the database.
+ * Retrieves all players.
  */
 function readPlayers(_request: Request, response: Response, next: NextFunction): void {
     db.manyOrNone('SELECT * FROM Player')
         .then((data: Player[]): void => {
-            // data is a list, never null, so returnDataOr404 isn't needed.
             response.send(data);
         })
         .catch((error: Error): void => {
@@ -127,7 +89,7 @@ function readPlayers(_request: Request, response: Response, next: NextFunction):
 }
 
 /**
- * Retrieves a specific player by ID.
+ * Retrieves one player by ID.
  */
 function readPlayer(request: Request, response: Response, next: NextFunction): void {
     db.oneOrNone('SELECT * FROM Player WHERE id=${id}', request.params)
@@ -140,32 +102,16 @@ function readPlayer(request: Request, response: Response, next: NextFunction): v
 }
 
 /**
- * This function is intentionally vulnerable to SQL injection attacks because it:
- * - Directly concatenates user input into the SQL query string rather than using parameterized queries.
- * - Allows manyOrNone results, rather than the zero-or-one it should expect.
- * - Uses a PSQL administrator account, which has more privileges than it needs.
- * See `sql/test-sqlInjection.http` for example attack URLs and CURL commands.
- */
-// function readPlayerBad(request: Request, response: Response, next: NextFunction): void {
-//     db.manyOrNone('SELECT * FROM Player WHERE id=' + request.params.id)
-//         .then((data: Player[] | null): void => {
-//             returnDataOr404(response, data);
-//         })
-//         .catch((error: Error): void => {
-//             next(error);
-//         });
-// }
-
-/**
- * This function updates an existing player's information, returning the
- * updated player's ID if successful, or a 404 status if the player doesn't
- * exist.
+ * Updates a player.
  */
 function updatePlayer(request: Request, response: Response, next: NextFunction): void {
-    db.oneOrNone('UPDATE Player SET email=${body.email}, name=${body.name} WHERE id=${params.id} RETURNING id', {
-        params: request.params,
-        body: request.body as PlayerInput
-    })
+    db.oneOrNone(
+        'UPDATE Player SET email=${body.email}, name=${body.name} WHERE id=${params.id} RETURNING id',
+        {
+            params: request.params,
+            body: request.body as PlayerInput
+        }
+    )
         .then((data: { id: number } | null): void => {
             returnDataOr404(response, data);
         })
@@ -175,16 +121,14 @@ function updatePlayer(request: Request, response: Response, next: NextFunction):
 }
 
 /**
- * This function creates a new player in the database based on the provided
- * email and name, returning the newly created player's ID. The database is
- * assumed to automatically assign a unique ID using auto-increment.
+ * Creates a player.
  */
 function createPlayer(request: Request, response: Response, next: NextFunction): void {
-    db.one('INSERT INTO Player(email, name) VALUES (${email}, ${name}) RETURNING id',
+    db.one(
+        'INSERT INTO Player(email, name) VALUES (${email}, ${name}) RETURNING id',
         request.body as PlayerInput
     )
         .then((data: { id: number }): void => {
-            // New players are always created, so returnDataOr404 isn't needed.
             response.send(data);
         })
         .catch((error: Error): void => {
@@ -193,26 +137,78 @@ function createPlayer(request: Request, response: Response, next: NextFunction):
 }
 
 /**
- * This function deletes an existing player based on ID.
- *
- * Deleting a player requires cascading deletion of PlayerGame records first to
- * maintain referential integrity. This function uses a transaction (`tx()`) to
- * ensure that both the PlayerGame records and the Player record are deleted
- * atomically (i.e., either both operations succeed or both fail together).
- *
- * This function performs a "hard" delete that actually removes records from the
- * database. Production systems generally to use "soft" deletes in which records
- * are marked as archived/deleted rather than actually deleting them. This helps
- * support data recovery and audit trails.
+ * Deletes a player and its PlayerGame rows.
  */
 function deletePlayer(request: Request, response: Response, next: NextFunction): void {
     db.tx((t) => {
         return t.none('DELETE FROM PlayerGame WHERE playerID=${id}', request.params)
             .then(() => {
-                return t.oneOrNone('DELETE FROM Player WHERE id=${id} RETURNING id', request.params);
+                return t.oneOrNone(
+                    'DELETE FROM Player WHERE id=${id} RETURNING id',
+                    request.params
+                );
             });
     })
         .then((data: { id: number } | null): void => {
+            returnDataOr404(response, data);
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
+}
+
+/* =
+   NEW — GAME ENDPOINTS FOR HOMEWORK 3
+   = */
+
+/**
+ * GET /games — returns all games.
+ */
+function readGames(_request: Request, response: Response, next: NextFunction): void {
+    db.manyOrNone('SELECT * FROM Game ORDER BY id')
+        .then((data): void => {
+            response.send(data);
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
+}
+
+/**
+ * GET /games/:id — returns players + scores for that game.
+ */
+function readGamePlayers(request: Request, response: Response, next: NextFunction): void {
+    const sql = `
+        SELECT Player.id, Player.name, Player.email, PlayerGame.score
+        FROM PlayerGame
+        JOIN Player ON Player.id = PlayerGame.playerID
+        WHERE PlayerGame.gameID = ${'id'}
+        ORDER BY PlayerGame.playerID
+    `;
+
+    db.manyOrNone(sql, request.params)
+        .then((data): void => {
+            response.send(data);
+        })
+        .catch((error: Error): void => {
+            next(error);
+        });
+}
+
+/**
+ * DELETE /games/:id — deletes a game and its dependent rows.
+ */
+function deleteGame(request: Request, response: Response, next: NextFunction): void {
+    db.tx((t) => {
+        return t.none('DELETE FROM PlayerGame WHERE gameID=${id}', request.params)
+            .then(() => {
+                return t.oneOrNone(
+                    'DELETE FROM Game WHERE id=${id} RETURNING id',
+                    request.params
+                );
+            });
+    })
+        .then((data): void => {
             returnDataOr404(response, data);
         })
         .catch((error: Error): void => {
