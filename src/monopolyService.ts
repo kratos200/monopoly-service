@@ -4,10 +4,12 @@
 
 import express from 'express';
 import pgPromise from 'pg-promise';
+import cors from 'cors';
 
 // Import types for compile-time checking.
 import type { Request, Response, NextFunction } from 'express';
 import type { Player, PlayerInput } from './player.js';
+
 
 // Set up the database
 const db = pgPromise()({
@@ -22,6 +24,10 @@ const db = pgPromise()({
 const app = express();
 const port: number = parseInt(process.env.PORT as string) || 3000;
 const router = express.Router();
+app.use(cors({
+  origin: ["http://localhost:8081", "http://localhost:19006"],
+}));
+
 
 router.use(express.json());
 router.get('/', readHello);
