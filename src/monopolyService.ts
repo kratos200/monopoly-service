@@ -188,18 +188,19 @@ function readGamePlayers(request: Request, response: Response, next: NextFunctio
         SELECT Player.id, Player.name, Player.email, PlayerGame.score
         FROM PlayerGame
         JOIN Player ON Player.id = PlayerGame.playerID
-        WHERE PlayerGame.gameID = ${'id'}
+        WHERE PlayerGame.gameID = $1
         ORDER BY PlayerGame.playerID
     `;
 
-    db.manyOrNone(sql, request.params)
+    db.manyOrNone(sql, [request.params.id])
         .then((data): void => {
-            response.send(data);
+            response.json(data);
         })
         .catch((error: Error): void => {
             next(error);
         });
 }
+
 
 /**
  * DELETE /games/:id — deletes a game and its dependent rows.
