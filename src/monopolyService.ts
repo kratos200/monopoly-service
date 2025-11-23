@@ -194,13 +194,12 @@ function readGamePlayers(request: Request, response: Response, next: NextFunctio
 
     db.manyOrNone(sql, [request.params.id])
         .then((data): void => {
-            response.json(data);
+            response.send(data);
         })
         .catch((error: Error): void => {
             next(error);
         });
 }
-
 
 /**
  * DELETE /games/:id — deletes a game and its dependent rows.
