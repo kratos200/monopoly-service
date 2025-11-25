@@ -185,11 +185,11 @@ function readGames(_request: Request, response: Response, next: NextFunction): v
  */
 function readGamePlayers(request: Request, response: Response, next: NextFunction): void {
     const sql = `
-        SELECT Player.id, Player.name, Player.email, PlayerGame.score
-        FROM PlayerGame
-        JOIN Player ON Player.id = PlayerGame.playerID
-        WHERE PlayerGame.gameID = $1
-        ORDER BY PlayerGame.playerID
+        SELECT p.id, p.name, pg.score
+        FROM Player p
+        JOIN PlayerGame pg ON p.id = pg.playerID
+        WHERE pg.gameID = $1
+        ORDER BY p.id
     `;
 
     db.manyOrNone(sql, [request.params.id])
